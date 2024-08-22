@@ -9,7 +9,7 @@ Usage: main.py [OPTIONS] COMMAND [ARGS]...
 Options:
   --sbom-file TEXT                Full path to SBOM file  [env var: SBOM_FILE;
                                   required]
-  ----ignore-file TEXT            Full path to a file contain new line delimited
+  ----ignore-file TEXT            Full path to a file containing new line delimited
                                   dependencies to ignore
   --prune-repeated-subdependencies / --no-prune-repeated-subdependencies
                                   Use if too many repeated sub dependencies
