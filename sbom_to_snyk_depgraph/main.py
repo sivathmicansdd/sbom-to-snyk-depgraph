@@ -142,6 +142,7 @@ def monitor(
         envvar="SNYK_ORG_ID",
         help="Please specify the Snyk ORG ID to run commands against",
     ),
+    project_name: str = typer.Option(None, help="project name in Snyk UI"),
 ):
     """
     Monitor SBOM with Snyk
@@ -149,6 +150,10 @@ def monitor(
     global dep_graph
 
     snyk_client = SnykClient(snyk_token)
+
+    if project_name:
+        dep_graph.rename_depgraph(project_name)
+
     response: requests.Response = snyk_client.post(
         f"{DEPGRAPH_BASE_MONITOR_URL}{snyk_org_id}", body=dep_graph.graph()
     )
