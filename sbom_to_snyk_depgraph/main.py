@@ -2,6 +2,7 @@ import typer
 import json
 import time
 import sys
+import re
 import logging
 import requests
 from uuid import UUID
@@ -26,8 +27,8 @@ g = {}
 DEPGRAPH_BASE_TEST_URL = "/test/dep-graph?org="
 DEPGRAPH_BASE_MONITOR_URL = "/monitor/dep-graph?org="
 
-package_source = "maven"
-dep_graph = DepGraph(package_source, False)
+#default to maven
+dep_graph = DepGraph("maven", False)
 
 visited = []
 visited_temp = []
@@ -51,21 +52,27 @@ def main(
         help="Use if too many repeated sub dependencies causes test or monitor to fail",
     ),
     ignore_file: str = typer.Option(None, help="Full path to ignore file"),
+    package_source: str = typer.Option(None, help="Type of package manager, defaults to maven"),
+    project_name: str = typer.Option(None, help="project name in Snyk UI"),
     debug: bool = typer.Option(False, help="Set log level to debug"),
 ):
     """Entrypoint into typer CLI handling"""
 
     global ignored_deps
+    global dep_graph
 
     if debug:
         logger.debug("*** DEBUG MODE ENABLED ***", file=sys.stderr)
         logger.setLevel(logging.DEBUG)
 
+    logger.debug("sbom_file: " + sbom_file)
+
     if ignore_file:
         with open(ignore_file) as data:
             ignored_deps = list(filter(None, data.read().split("\n")))
 
-    logger.debug("sbom_file: " + sbom_file)
+    if package_source:
+        dep_graph = DepGraph(package_source, False)
 
     with open(sbom_file) as input_json:
         g["sbom"] = Bom.from_json(data=json.loads(input_json.read()))
@@ -85,6 +92,10 @@ def main(
             logger.info("Pruning graph ...")
             time.sleep(2)
             prune()
+
+        if project_name:
+            logger.debug("renaming nodes to: " + project_name)
+            dep_graph.rename_depgraph(project_name)
 
     return
 
@@ -115,8 +126,6 @@ def test(
     """
     Test SBOM with Snyk
     """
-    global dep_graph
-
     snyk_client = SnykClient(snyk_token)
     response: requests.Response = snyk_client.post(
         f"{DEPGRAPH_BASE_TEST_URL}{snyk_org_id}", body=dep_graph.graph()
@@ -142,17 +151,11 @@ def monitor(
         envvar="SNYK_ORG_ID",
         help="Please specify the Snyk ORG ID to run commands against",
     ),
-    project_name: str = typer.Option(None, help="project name in Snyk UI"),
 ):
     """
     Monitor SBOM with Snyk
-    """
-    global dep_graph
-
+    """        
     snyk_client = SnykClient(snyk_token)
-
-    if project_name:
-        dep_graph.rename_depgraph(project_name)
 
     response: requests.Response = snyk_client.post(
         f"{DEPGRAPH_BASE_MONITOR_URL}{snyk_org_id}", body=dep_graph.graph()
@@ -277,7 +280,8 @@ def purl_to_depgraph_dep(purl: str) -> str:
     if k < 0:
         return purl
 
-    depgraph_dep_name = purl[:k].replace("pkg:maven/", "").replace("/", ":")
+    #depgraph_dep_name = purl[:k].replace("pkg:maven/", "").replace("/", ":")
+    depgraph_dep_name = re.sub("pkg:[a-zA-Z]*/","",purl[:k],1).replace("/", ":")
     depgraph_dep_version = purl[k + 1 :]
 
     k = depgraph_dep_version.find("?")

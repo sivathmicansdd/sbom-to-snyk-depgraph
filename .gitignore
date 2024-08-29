@@ -1,0 +1,6 @@
+sbom_to_snyk_depgraph/ignore.txt
+.github
+.DS_Store
+sbom_to_snyk_depgraph/__pycache__/
+.vscode/settings.json
+.python-version
