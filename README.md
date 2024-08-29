@@ -3,6 +3,8 @@
 # sbom-to-snyk-depgraph
 Convert [CycloneDX](https://cyclonedx.org/) SBOM to snyk depgraph and monitor/test/print
 
+# Note - this script requires FF:depGraphApi to be enabled at group level or a 404 will be returned
+
 ```
 Usage: main.py [OPTIONS] COMMAND [ARGS]...
 
