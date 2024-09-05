@@ -27,8 +27,7 @@ g = {}
 DEPGRAPH_BASE_TEST_URL = "/test/dep-graph?org="
 DEPGRAPH_BASE_MONITOR_URL = "/monitor/dep-graph?org="
 
-#default to maven
-dep_graph = DepGraph("maven", False)
+dep_graph = None
 
 visited = []
 visited_temp = []
@@ -52,7 +51,7 @@ def main(
         help="Use if too many repeated sub dependencies causes test or monitor to fail",
     ),
     ignore_file: str = typer.Option(None, help="Full path to ignore file"),
-    package_source: str = typer.Option(None, help="Type of package manager, defaults to maven"),
+    package_source: str = typer.Option(None, help="Type of package manager, overrides auto-detect"),
     project_name: str = typer.Option(None, help="project name in Snyk UI"),
     debug: bool = typer.Option(False, help="Set log level to debug"),
 ):
@@ -65,17 +64,24 @@ def main(
         logger.debug("*** DEBUG MODE ENABLED ***", file=sys.stderr)
         logger.setLevel(logging.DEBUG)
 
-    logger.debug("sbom_file: " + sbom_file)
-
     if ignore_file:
         with open(ignore_file) as data:
             ignored_deps = list(filter(None, data.read().split("\n")))
 
-    if package_source:
-        dep_graph = DepGraph(package_source, False)
-
+    logger.debug("sbom_file: " + sbom_file)
     with open(sbom_file) as input_json:
         g["sbom"] = Bom.from_json(data=json.loads(input_json.read()))
+
+        #no user-defined package_source, try to auto-detect
+        if package_source is None:
+            package_source = get_package_manager_from_sbom()
+
+        logger.debug("package_source: " + package_source)
+        dep_graph = DepGraph(package_source, False)
+
+        if package_source is None:
+            print("No package source defined or detected (tried purl and name for pkg:<package manager>)")
+            exit
 
         root_component_ref = "unknown"
 
@@ -296,6 +302,20 @@ def purl_to_depgraph_dep(purl: str) -> str:
 
     return depgraph_dep
 
+def get_package_manager_from_sbom() -> str:
+    package_manager = None
+
+    if g["sbom"]._metadata.component.purl:
+        purl = f"{str(g['sbom']._metadata.component.purl)}"
+        package_manager = re.search("pkg:([a-zA-Z0-9_-]*)", purl, flags=re.IGNORECASE).group()
+
+    if g["sbom"]._metadata.component.name and package_manager is None:
+        name = f"{str(g['sbom']._metadata.component.name)}"
+        package_manager = re.search("pkg:([a-zA-Z0-9_-]*)", name, flags=re.IGNORECASE).group()
+
+    package_manager = package_manager.replace("pkg:", "")
+
+    return package_manager
 
 # ----- app entrypoint ------
 if __name__ == "__main__":
