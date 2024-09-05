@@ -76,12 +76,13 @@ def main(
         if package_source is None:
             package_source = get_package_manager_from_sbom()
 
+        if package_source is None:
+            typer.echo("No package source defined or detected (tried purl and name for pkg:<package manager>)", file=sys.stderr)
+            sys.exit(1)
+            
         logger.debug("package_source: " + package_source)
         dep_graph = DepGraph(package_source, False)
 
-        if package_source is None:
-            print("No package source defined or detected (tried purl and name for pkg:<package manager>)")
-            exit
 
         root_component_ref = "unknown"
 
