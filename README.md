@@ -13,6 +13,7 @@ Options:
                                   required]
   ----ignore-file TEXT            Full path to a file containing new line delimited
                                   dependencies to ignore
+  --package-source TEXT           Type of package manager (npm, maven, etc), overrides auto-detect
   --prune-repeated-subdependencies / --no-prune-repeated-subdependencies
                                   Use if too many repeated sub dependencies
                                   causes test or monitor to fail  [default:
