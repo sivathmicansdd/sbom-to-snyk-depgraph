@@ -180,10 +180,17 @@ class DepGraph(object):
     def set_root_node_package(self, root_node: str):
         logger.debug(f"{root_node=}")
         root_pkg = self.dep_graph['depGraph']['pkgs'][0]
+
+        if root_node.count("@") > 0 :
+            root_node_split = root_node.split("@")
+            root_pkg['info']['name'] = f"{root_node_split[0]}"
+            root_pkg['info']['version'] = f"{root_node_split[1]}"
+        else :
+            root_pkg['info']['name'] = f"{root_node}"
+            root_pkg['info']['version'] = f"0.0.0"
+            root_node = f"{root_node}0.0.0"
+
         root_pkg['id'] = f"{root_node}"
-        root_node_split = root_node.split("@")
-        root_pkg['info']['name'] = f"{root_node_split[0]}"
-        root_pkg['info']['version'] = f"{root_node_split[1]}"
 
         graph = self.dep_graph['depGraph']['graph']
         graph['rootNodeId'] = root_node

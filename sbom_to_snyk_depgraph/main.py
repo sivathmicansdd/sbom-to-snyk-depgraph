@@ -83,7 +83,6 @@ def main(
         logger.debug("package_source: " + package_source)
         dep_graph = DepGraph(package_source, False)
 
-
         root_component_ref = "unknown"
 
         if g["sbom"]._metadata.component.purl:
@@ -93,7 +92,7 @@ def main(
 
         logger.debug(f"{root_component_ref=}")
 
-        sbom_to_depgraph(parent_component_ref=root_component_ref, depth=0)
+        sbom_to_depgraph(parent_component_ref=root_component_ref, depth=0, parent_nodes=[])
 
         if prune_repeated_subdependencies:
             logger.info("Pruning graph ...")
@@ -182,7 +181,7 @@ def monitor(
 # -----------------
 
 
-def sbom_to_depgraph(parent_component_ref: str, depth: int) -> DepGraph:
+def sbom_to_depgraph(parent_component_ref: str, depth: int, parent_nodes: List[str]) -> DepGraph:
     """
     Convert the CDX SBOM components to snyk depgraph to find issues
     """
@@ -201,6 +200,8 @@ def sbom_to_depgraph(parent_component_ref: str, depth: int) -> DepGraph:
 
     children = get_dependencies_from_ref(parent_component_ref)
     logger.debug(f"found child dependencies: {children=}")
+
+    this_childs_parents = parent_nodes + [parent_component_ref]
 
     for child in children:
         logger.debug(f"{str(child)=}")
@@ -221,11 +222,13 @@ def sbom_to_depgraph(parent_component_ref: str, depth: int) -> DepGraph:
         visited_temp.append(parent_component_ref)
 
         # if we've already processed this subtree, then just return
-        if child not in visited:
-            sbom_to_depgraph(str(child), depth=depth + 1)
-        # else:
-        # future use for smarter pruning
-        # account for node in the subtree to count all paths
+        if child not in visited and child not in this_childs_parents:
+            sbom_to_depgraph(str(child), depth=depth + 1, parent_nodes=this_childs_parents)
+            # else:
+            # future use for smarter pruning
+            # account for node in the subtree to count all paths
+        if child in this_childs_parents:
+            print(f"child {child} already processed in parent_nodes - cyclic reference")
 
     # we've reach a leaf node and just need to add an entry with empty deps array
     if len(children) == 0:
@@ -288,12 +291,18 @@ def purl_to_depgraph_dep(purl: str) -> str:
         return purl
 
     #depgraph_dep_name = purl[:k].replace("pkg:maven/", "").replace("/", ":")
-    depgraph_dep_name = re.sub("pkg:[a-zA-Z]*/","",purl[:k],1).replace("/", ":")
+    depgraph_dep_name = re.sub("pkg:([a-zA-Z0-9_-]*)/","", purl[:k]).replace("/", ":")
+    logger.debug("depgraph_dep_name: " + depgraph_dep_name )
+
     depgraph_dep_version = purl[k + 1 :]
 
+    #what is this doing?
+    #is this maven specific?
     k = depgraph_dep_version.find("?")
 
     if k < 0:
+        purl = re.sub("pkg:([a-zA-Z0-9_-]*)/","",purl)
+        logger.debug("returning purl for purl_to_depgraph_dep: " + purl)
         return purl
 
     depgraph_dep_version = depgraph_dep_version[:k]
