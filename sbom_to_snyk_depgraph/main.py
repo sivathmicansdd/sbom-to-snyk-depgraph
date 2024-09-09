@@ -2,6 +2,7 @@ import typer
 import json
 import time
 import sys
+import re
 import logging
 import requests
 from uuid import UUID
@@ -26,8 +27,7 @@ g = {}
 DEPGRAPH_BASE_TEST_URL = "/test/dep-graph?org="
 DEPGRAPH_BASE_MONITOR_URL = "/monitor/dep-graph?org="
 
-package_source = "maven"
-dep_graph = DepGraph(package_source, False)
+dep_graph = None
 
 visited = []
 visited_temp = []
@@ -51,11 +51,14 @@ def main(
         help="Use if too many repeated sub dependencies causes test or monitor to fail",
     ),
     ignore_file: str = typer.Option(None, help="Full path to ignore file"),
+    package_source: str = typer.Option(None, help="Type of package manager, overrides auto-detect"),
+    project_name: str = typer.Option(None, help="project name in Snyk UI"),
     debug: bool = typer.Option(False, help="Set log level to debug"),
 ):
     """Entrypoint into typer CLI handling"""
 
     global ignored_deps
+    global dep_graph
 
     if debug:
         logger.debug("*** DEBUG MODE ENABLED ***", file=sys.stderr)
@@ -66,9 +69,19 @@ def main(
             ignored_deps = list(filter(None, data.read().split("\n")))
 
     logger.debug("sbom_file: " + sbom_file)
-
     with open(sbom_file) as input_json:
         g["sbom"] = Bom.from_json(data=json.loads(input_json.read()))
+
+        #no user-defined package_source, try to auto-detect
+        if package_source is None:
+            package_source = get_package_manager_from_sbom()
+
+        if package_source is None:
+            typer.echo("No package source defined or detected (tried purl and name for pkg:<package manager>)", file=sys.stderr)
+            sys.exit(1)
+            
+        logger.debug("package_source: " + package_source)
+        dep_graph = DepGraph(package_source, False)
 
         root_component_ref = "unknown"
 
@@ -79,12 +92,16 @@ def main(
 
         logger.debug(f"{root_component_ref=}")
 
-        sbom_to_depgraph(parent_component_ref=root_component_ref, depth=0)
+        sbom_to_depgraph(parent_component_ref=root_component_ref, depth=0, parent_nodes=[])
 
         if prune_repeated_subdependencies:
             logger.info("Pruning graph ...")
             time.sleep(2)
             prune()
+
+        if project_name:
+            logger.debug("renaming nodes to: " + project_name)
+            dep_graph.rename_depgraph(project_name)
 
     return
 
@@ -115,8 +132,6 @@ def test(
     """
     Test SBOM with Snyk
     """
-    global dep_graph
-
     snyk_client = SnykClient(snyk_token)
     response: requests.Response = snyk_client.post(
         f"{DEPGRAPH_BASE_TEST_URL}{snyk_org_id}", body=dep_graph.graph()
@@ -142,17 +157,11 @@ def monitor(
         envvar="SNYK_ORG_ID",
         help="Please specify the Snyk ORG ID to run commands against",
     ),
-    project_name: str = typer.Option(None, help="project name in Snyk UI"),
 ):
     """
     Monitor SBOM with Snyk
-    """
-    global dep_graph
-
+    """        
     snyk_client = SnykClient(snyk_token)
-
-    if project_name:
-        dep_graph.rename_depgraph(project_name)
 
     response: requests.Response = snyk_client.post(
         f"{DEPGRAPH_BASE_MONITOR_URL}{snyk_org_id}", body=dep_graph.graph()
@@ -172,7 +181,7 @@ def monitor(
 # -----------------
 
 
-def sbom_to_depgraph(parent_component_ref: str, depth: int) -> DepGraph:
+def sbom_to_depgraph(parent_component_ref: str, depth: int, parent_nodes: List[str]) -> DepGraph:
     """
     Convert the CDX SBOM components to snyk depgraph to find issues
     """
@@ -191,6 +200,8 @@ def sbom_to_depgraph(parent_component_ref: str, depth: int) -> DepGraph:
 
     children = get_dependencies_from_ref(parent_component_ref)
     logger.debug(f"found child dependencies: {children=}")
+
+    this_childs_parents = parent_nodes + [parent_component_ref]
 
     for child in children:
         logger.debug(f"{str(child)=}")
@@ -211,11 +222,13 @@ def sbom_to_depgraph(parent_component_ref: str, depth: int) -> DepGraph:
         visited_temp.append(parent_component_ref)
 
         # if we've already processed this subtree, then just return
-        if child not in visited:
-            sbom_to_depgraph(str(child), depth=depth + 1)
-        # else:
-        # future use for smarter pruning
-        # account for node in the subtree to count all paths
+        if child not in visited and child not in this_childs_parents:
+            sbom_to_depgraph(str(child), depth=depth + 1, parent_nodes=this_childs_parents)
+            # else:
+            # future use for smarter pruning
+            # account for node in the subtree to count all paths
+        if child in this_childs_parents:
+            print(f"child {child} already processed in parent_nodes - cyclic reference")
 
     # we've reach a leaf node and just need to add an entry with empty deps array
     if len(children) == 0:
@@ -277,12 +290,19 @@ def purl_to_depgraph_dep(purl: str) -> str:
     if k < 0:
         return purl
 
-    depgraph_dep_name = purl[:k].replace("pkg:maven/", "").replace("/", ":")
+    #depgraph_dep_name = purl[:k].replace("pkg:maven/", "").replace("/", ":")
+    depgraph_dep_name = re.sub("pkg:([a-zA-Z0-9_-]*)/","", purl[:k]).replace("/", ":")
+    logger.debug("depgraph_dep_name: " + depgraph_dep_name )
+
     depgraph_dep_version = purl[k + 1 :]
 
+    #what is this doing?
+    #is this maven specific?
     k = depgraph_dep_version.find("?")
 
     if k < 0:
+        purl = re.sub("pkg:([a-zA-Z0-9_-]*)/","",purl)
+        logger.debug("returning purl for purl_to_depgraph_dep: " + purl)
         return purl
 
     depgraph_dep_version = depgraph_dep_version[:k]
@@ -292,6 +312,20 @@ def purl_to_depgraph_dep(purl: str) -> str:
 
     return depgraph_dep
 
+def get_package_manager_from_sbom() -> str:
+    package_manager = None
+
+    if g["sbom"]._metadata.component.purl:
+        purl = f"{str(g['sbom']._metadata.component.purl)}"
+        package_manager = re.search("pkg:([a-zA-Z0-9_-]*)", purl, flags=re.IGNORECASE).group()
+
+    if g["sbom"]._metadata.component.name and package_manager is None:
+        name = f"{str(g['sbom']._metadata.component.name)}"
+        package_manager = re.search("pkg:([a-zA-Z0-9_-]*)", name, flags=re.IGNORECASE).group()
+
+    package_manager = package_manager.replace("pkg:", "")
+
+    return package_manager
 
 # ----- app entrypoint ------
 if __name__ == "__main__":

@@ -3,6 +3,8 @@
 # sbom-to-snyk-depgraph
 Convert [CycloneDX](https://cyclonedx.org/) SBOM to snyk depgraph and monitor/test/print
 
+# Note - this script requires FF:depGraphApi to be enabled at group level or a 404 will be returned
+
 ```
 Usage: main.py [OPTIONS] COMMAND [ARGS]...
 
@@ -11,6 +13,7 @@ Options:
                                   required]
   ----ignore-file TEXT            Full path to a file containing new line delimited
                                   dependencies to ignore
+  --package-source TEXT           Type of package manager (npm, maven, etc), overrides auto-detect
   --prune-repeated-subdependencies / --no-prune-repeated-subdependencies
                                   Use if too many repeated sub dependencies
                                   causes test or monitor to fail  [default:
