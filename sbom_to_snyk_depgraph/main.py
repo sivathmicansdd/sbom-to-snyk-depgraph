@@ -228,7 +228,7 @@ def sbom_to_depgraph(parent_component_ref: str, depth: int, parent_nodes: List[s
             # future use for smarter pruning
             # account for node in the subtree to count all paths
         if child in this_childs_parents:
-            print(f"child {child} already processed in parent_nodes - cyclic reference")
+            logger.debug(f"child {child} already processed in parent_nodes - cyclic reference")
 
     # we've reach a leaf node and just need to add an entry with empty deps array
     if len(children) == 0:
