@@ -14,6 +14,8 @@ class DepGraph(object):
         debug: bool = False,
         bazel_query_output: str = None
     ):
+        if debug:
+            logger.setLevel(logging.DEBUG)
         self.pkg_manager_name = pkg_manager_name
         self.meta_pkg_id = "meta-common-packages@meta"
         self.dep_graph = {
@@ -120,7 +122,7 @@ class DepGraph(object):
 
         if parent_node:
             if child_node_id:
-                # append the dep,only if it doesn't already exist as a child
+                # append the dep, only if it doesn't already exist as a child
                 dep_entry = {
                         "nodeId": child_node_id
                     }
@@ -160,8 +162,6 @@ class DepGraph(object):
 
         graph_subtree = self.dep_graph['depGraph']['graph']['nodes']
 
-        #print(f"{graph_subtree=}")
-
         for subtree_node in graph_subtree:
                 logger.debug(f"{subtree_node=}")
                 logger.debug(f"checking if {subtree_node['nodeId']} has child dep {child_node_id}")
@@ -176,24 +176,35 @@ class DepGraph(object):
                     logger.debug(f"removing {child_node_entry} from subtree")
                     subtree_node['deps'].remove(child_node_entry)
 
+    def package_name_split(self, packageName: str, character: str) -> List :
+        
+        if packageName.count(character) == 1:
+            return packageName.split(character)
+        elif packageName.count(character) > 1:
+            packageName = packageName.split(character)
+            return character.join(packageName[:2]), character.join(packageName[2:])
+        else:
+            return [packageName]
     
     def set_root_node_package(self, root_node: str):
-        logger.debug(f"{root_node=}")
+
+        root_node_split = self.package_name_split(root_node, "@")
+
+        if len(root_node_split) != 2:
+            logger.debug("invalid root package format, package@version required")
+            return
+
+        #set first package to root_node name and version
         root_pkg = self.dep_graph['depGraph']['pkgs'][0]
+        root_pkg['info']['name'] = f"{root_node_split[0]}"
+        root_pkg['info']['version'] = f"{root_node_split[1]}"
+        root_pkg['id'] = root_node
 
-        if root_node.count("@") > 0 :
-            root_node_split = root_node.split("@")
-            root_pkg['info']['name'] = f"{root_node_split[0]}"
-            root_pkg['info']['version'] = f"{root_node_split[1]}"
-        else :
-            root_pkg['info']['name'] = f"{root_node}"
-            root_pkg['info']['version'] = f"0.0.0"
-            root_node = f"{root_node}0.0.0"
-
-        root_pkg['id'] = f"{root_node}"
-
+        #set root node 
         graph = self.dep_graph['depGraph']['graph']
         graph['rootNodeId'] = root_node
+
+        #set first graph node id and pkgId to root node
         graph['nodes'][0]['nodeId'] = root_node
         graph['nodes'][0]['pkgId'] = root_node
     
@@ -211,9 +222,16 @@ class DepGraph(object):
     def rename_depgraph(self, new_name):
         root_node_id = self.dep_graph["depGraph"]["graph"]["rootNodeId"]
         root_node_index = self._find_node_index(self.dep_graph["depGraph"]["graph"], root_node_id)
-        old_package_name, package_version = self.dep_graph["depGraph"]["graph"]["nodes"][root_node_index]["pkgId"].split("@")
 
-        # Rename the root note
+        pkgId_split = self.package_name_split(self.dep_graph["depGraph"]["graph"]["nodes"][root_node_index]["pkgId"], "@")
+        if len(pkgId_split) != 2:
+            logger.debug("invalid root package format, package@version required")
+            return
+        
+        old_package_name = pkgId_split[0]
+        package_version = pkgId_split[1]
+
+        # Rename the root node
         self.dep_graph["depGraph"]["graph"]["nodes"][root_node_index]["nodeId"] = new_name
         self.dep_graph["depGraph"]["graph"]["nodes"][root_node_index]["pkgId"] = f"{new_name}@{package_version}"
 
