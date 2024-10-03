@@ -155,7 +155,7 @@ def test(
     )
 
     json_response = response.json()
-    logger.debug(json.dumps(json_response, indent=4))
+    print(json.dumps(json_response, indent=4))
 
     if str(json_response["ok"]) == "False":
         typer.echo("exiting with code 1", file=sys.stderr)
@@ -185,7 +185,7 @@ def monitor(
     )
 
     json_response = response.json()
-    logger.debug(json.dumps(json_response, indent=4))
+    print(json.dumps(json_response, indent=4))
 
     if str(json_response["ok"]) == "False":
         typer.echo("exiting with code 1", file=sys.stderr)
