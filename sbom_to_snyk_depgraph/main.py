@@ -29,6 +29,7 @@ DEPGRAPH_BASE_TEST_URL = "/test/dep-graph?org="
 DEPGRAPH_BASE_MONITOR_URL = "/monitor/dep-graph?org="
 
 dep_graph = None
+root_component_ref = ""
 
 visited = []
 visited_temp = []
@@ -64,6 +65,7 @@ def main(
     global dep_graph
     global visited
     global visited_temp
+    global root_component_ref
 
     if debug:
         logger.debug("*** DEBUG MODE ENABLED ***", file=sys.stderr)
@@ -100,13 +102,13 @@ def main(
         if root_node is None: 
             root_component_ref = "unknown"
             if g["sbom"]._metadata.component.purl:
-                root_component_ref = f"{str(g['sbom']._metadata.component.purl)}"
+                root_component_ref = purl_to_depgraph_dep(str(g['sbom']._metadata.component.purl))
                 logger.debug(f"Setting root node to {root_component_ref} from sbom component purl")
             elif g["sbom"]._metadata.component.name:
-                root_component_ref = f"{str(g['sbom']._metadata.component.name)}"
+                root_component_ref = purl_to_depgraph_dep(str(g['sbom']._metadata.component.name))
                 logger.debug(f"Setting root node to {root_component_ref} from sbom component name")
         else : 
-            root_component_ref = root_node 
+            root_component_ref = purl_to_depgraph_dep(root_node)
             logger.debug(f"Setting root node to {root_node} from CLI argument!")
 
         sbom_to_depgraph(parent_component_ref=root_component_ref, depth=0, parent_nodes=[])
@@ -284,34 +286,25 @@ def sbom_to_depgraph(parent_component_ref: str, depth: int, parent_nodes: List[s
     global visited
     global visited_temp
 
-    #translate any pkg:maven and ? after version to depgraph format
+    #translate any pkg:maven and remove ? after version for depgraph format
     parent_dep_for_depgraph = purl_to_depgraph_dep(purl=parent_component_ref)
 
     # special entry for the root node of the dep graph
     if depth == 0:
-        if parent_dep_for_depgraph.count("@") < 1 :
-            parent_dep_for_depgraph = f"{parent_dep_for_depgraph}@0.0.0"
         logger.debug(f"setting depgraph root node to: {parent_dep_for_depgraph}")
         dep_graph.set_root_node_package(f"{parent_dep_for_depgraph}")
+        logger.debug(f"\n\nProcessing Children for {parent_component_ref}\n")
 
-        logger.debug(f"\n\nProcessing Children\n")
-
-    children = get_dependencies_from_ref(parent_component_ref)
-    this_childs_parents = parent_nodes + [parent_component_ref]
+    children = get_dependencies_from_ref(parent_dep_for_depgraph)
+    this_childs_parents = parent_nodes + [parent_dep_for_depgraph]
 
     for child in children:
-        #translate reference format "pkg:npm/@<root>/http@link:../../packages/http",
-        child = translate_link_format(child)
+        if str(child) != root_component_ref:
+            dep_graph.add_pkg(child)
+            increment_dep_path_count(child)
+            dep_graph.add_dep(child_node_id=child, parent_node_id=parent_dep_for_depgraph)
 
-        depgraph_dep = purl_to_depgraph_dep(purl=str(child))
-
-        dep_graph.add_pkg(depgraph_dep)
-        increment_dep_path_count(depgraph_dep)
-        dep_graph.add_dep(
-            child_node_id=depgraph_dep, parent_node_id=parent_dep_for_depgraph
-        )
-
-        visited_temp.append(parent_component_ref)
+        visited_temp.append(parent_dep_for_depgraph)
 
         # if we've already processed this subtree, then just return
         if child not in visited and child not in this_childs_parents:
@@ -323,15 +316,13 @@ def sbom_to_depgraph(parent_component_ref: str, depth: int, parent_nodes: List[s
     if len(children) == 0:
         dep_graph.add_dep(child_node_id=None, parent_node_id=parent_dep_for_depgraph)
         visited.extend(visited_temp)
-
         visited_temp = []
-
 
 def get_dependencies_from_ref(dependency_ref) -> List:
     global ignored_deps
     children = []
     for dependency in g["sbom"].dependencies:
-        if str(dependency.ref) == dependency_ref:
+        if purl_to_depgraph_dep(str(dependency.ref)) == dependency_ref:
             if ignored_deps:
                 children.extend(
                     [
@@ -343,7 +334,7 @@ def get_dependencies_from_ref(dependency_ref) -> List:
                     ]
                 )
             else:
-                children.extend([str(x.ref) for x in dependency.dependencies])
+                children.extend([purl_to_depgraph_dep(str(x.ref)) for x in dependency.dependencies])
 
     return children
 
@@ -370,31 +361,22 @@ def purl_to_depgraph_dep(purl: str) -> str:
     """
     Convert purl format string to package@version for snyk
     """
+    depgraph_dep = translate_link_format(purl) #translate reference format "pkg:npm/@<root>/http@link:../../packages/http",
 
-    #see if we have a version number, if not, return?
-    k = dep_graph.package_name_split(purl, "@")
-    if len(k) < 2:
-        logger.debug(f"no @ in purl_to_depgraph_dep, returning purl: {purl}")
-        return purl
-
-    #if we do, separate into two parts
-    depgraph_dep_name = k[0]
-    depgraph_dep_version = k[1]
+    if depgraph_dep.count("@") < 1 :
+        depgraph_dep = f"{depgraph_dep}@0.0.0"
 
     #if trailing ? in version, cut it out
-    i = depgraph_dep_version.find("?")
+    i = depgraph_dep.find("?")
     if i > 0:
-        depgraph_dep_version = depgraph_dep_version[:i]
+        depgraph_dep = depgraph_dep[:i]
 
     #if we are maven, need to replace / with :
-    if "pkg:maven/" in depgraph_dep_name:
-        depgraph_dep_name = re.sub("pkg:([a-zA-Z0-9_-]*)/","",depgraph_dep_name)
-        depgraph_dep_name = depgraph_dep_name.replace("/", ":")
+    if "pkg:maven/" in depgraph_dep:
+        depgraph_dep = re.sub("pkg:([a-zA-Z0-9_-]*)/","",depgraph_dep)
+        depgraph_dep = depgraph_dep.replace("/", ":")
     else: 
-        depgraph_dep_name = re.sub("pkg:([a-zA-Z0-9_-]*)/","",depgraph_dep_name)
-
-    #combine name and version
-    depgraph_dep = depgraph_dep_name + "@" + depgraph_dep_version
+        depgraph_dep = re.sub("pkg:([a-zA-Z0-9_-]*)/","",depgraph_dep)
 
     return depgraph_dep
 
