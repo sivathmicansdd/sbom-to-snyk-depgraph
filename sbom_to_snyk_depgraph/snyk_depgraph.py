@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from typing import List
 import logging
+import re
 
 logger = logging.getLogger(__name__)
 FORMAT = "[%(filename)s:%(lineno)4s - %(funcName)s ] %(message)s"
@@ -176,23 +177,28 @@ class DepGraph(object):
                     logger.debug(f"removing {child_node_entry} from subtree")
                     subtree_node['deps'].remove(child_node_entry)
 
+    #splitting different kinds of package names:
+    # pkg:npm/lodash@4.17.21
+    # pkg:npm/@lodash@4.17.21
+    # pkg:npm/@lodash
+    # pkg:npm/@lod@sh@4.17.21 - is this possible to have?
+    # we always want to return [package,version]
+    # can we return [package, "0.0.0"] if no package version?
     def package_name_split(self, packageName: str, character: str) -> List :
-        
-        if packageName.count(character) == 1:
-            return packageName.split(character)
-        elif packageName.count(character) > 1:
-            packageName = packageName.split(character)
-            return character.join(packageName[:2]), character.join(packageName[2:])
+        #don't split a package on last @ if last @ isn't for version - ie: pkg:npm/@lodash
+        if re.search("@[0-9]", packageName):
+            res = packageName.rsplit(character, 1)
+
+            if res.count == 1: #only have package name
+                res.append("@0.0.0")
+            
+            return res
         else:
-            return [packageName]
+            return [packageName, "0.0.0"]
     
     def set_root_node_package(self, root_node: str):
 
         root_node_split = self.package_name_split(root_node, "@")
-
-        if len(root_node_split) != 2:
-            logger.debug("invalid root package format, package@version required")
-            return
 
         #set first package to root_node name and version
         root_pkg = self.dep_graph['depGraph']['pkgs'][0]
@@ -224,9 +230,6 @@ class DepGraph(object):
         root_node_index = self._find_node_index(self.dep_graph["depGraph"]["graph"], root_node_id)
 
         pkgId_split = self.package_name_split(self.dep_graph["depGraph"]["graph"]["nodes"][root_node_index]["pkgId"], "@")
-        if len(pkgId_split) != 2:
-            logger.debug("invalid root package format, package@version required")
-            return
         
         old_package_name = pkgId_split[0]
         package_version = pkgId_split[1]

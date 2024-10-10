@@ -29,7 +29,7 @@ DEPGRAPH_BASE_TEST_URL = "/test/dep-graph?org="
 DEPGRAPH_BASE_MONITOR_URL = "/monitor/dep-graph?org="
 
 dep_graph = None
-root_component_ref = ""
+sanitized_root_component_ref = None
 
 visited = []
 visited_temp = []
@@ -65,7 +65,7 @@ def main(
     global dep_graph
     global visited
     global visited_temp
-    global root_component_ref
+    global sanitized_root_component_ref
 
     if debug:
         logger.debug("*** DEBUG MODE ENABLED ***", file=sys.stderr)
@@ -100,18 +100,18 @@ def main(
 
         #figure out what root node is, it *should* be purl or name
         if root_node is None: 
-            root_component_ref = "unknown"
             if g["sbom"]._metadata.component.purl:
-                root_component_ref = purl_to_depgraph_dep(str(g['sbom']._metadata.component.purl))
-                logger.debug(f"Setting root node to {root_component_ref} from sbom component purl")
+                raw_root_component_ref = str(g['sbom']._metadata.component.purl)
+                logger.debug(f"Setting raw_root_component_ref to {raw_root_component_ref} from sbom component purl")
             elif g["sbom"]._metadata.component.name:
-                root_component_ref = purl_to_depgraph_dep(str(g['sbom']._metadata.component.name))
-                logger.debug(f"Setting root node to {root_component_ref} from sbom component name")
+                raw_root_component_ref = str(g['sbom']._metadata.component.name)
+                logger.debug(f"Setting raw_root_component_ref to {raw_root_component_ref} from sbom component name")
         else : 
-            root_component_ref = purl_to_depgraph_dep(root_node)
-            logger.debug(f"Setting root node to {root_node} from CLI argument!")
+            raw_root_component_ref = root_node
+            logger.debug(f"Setting raw_root_component_ref to {root_node} from CLI argument!")
 
-        sbom_to_depgraph(parent_component_ref=root_component_ref, depth=0, parent_nodes=[])
+        sanitized_root_component_ref = purl_remove_extra_chars(raw_root_component_ref)
+        sbom_to_depgraph(sanitized_parent_ref=sanitized_root_component_ref, depth=0, parent_nodes=[])
 
         if prune_repeated_subdependencies:
             logger.info("Pruning graph ...")
@@ -119,7 +119,7 @@ def main(
             prune()
 
         if project_name:
-            logger.debug("renaming nodes to: " + project_name)
+            logger.debug("renaming depgraph to: " + project_name)
             dep_graph.rename_depgraph(project_name)
 
     return
@@ -204,7 +204,7 @@ def get_package_name_and_version(purl: str) -> List:
     package_name_and_version = dep_graph.package_name_split(purl, "@")
 
     if len(package_name_and_version) < 2:
-        logger.debug(f"package_name_and_version {package_name_and_version} must have package@version")
+        logger.debug(f"package_name_and_version {package_name_and_version} should have package@version")
         return package_name_and_version
 
     if package_name_and_version[1].find("?") >= 0: #remove any ?at the end
@@ -279,28 +279,30 @@ def translate_link_format(package_ref: str) -> str | None:
         package_latest_version = package_key + "@-1.-1.-1"
         return package_latest_version
 
-def sbom_to_depgraph(parent_component_ref: str, depth: int, parent_nodes: List[str]) -> DepGraph:
+def sbom_to_depgraph(sanitized_parent_ref: str, depth: int, parent_nodes: List[str]) -> DepGraph:
     """
     Convert the CDX SBOM components to snyk depgraph to find issues
     """
     global visited
     global visited_temp
 
-    #translate any pkg:maven and remove ? after version for depgraph format
-    parent_dep_for_depgraph = purl_to_depgraph_dep(purl=parent_component_ref)
+    #translate any pkg:maven and remove ? after version for depgraph format - shouldn't be necessary at this point
+    parent_dep_for_depgraph = purl_remove_extra_chars(purl=sanitized_parent_ref)
 
     # special entry for the root node of the dep graph
     if depth == 0:
         logger.debug(f"setting depgraph root node to: {parent_dep_for_depgraph}")
         dep_graph.set_root_node_package(f"{parent_dep_for_depgraph}")
-        logger.debug(f"\n\nProcessing Children for {parent_component_ref}\n")
 
     children = get_dependencies_from_ref(parent_dep_for_depgraph)
+    if len(children) == 0 and depth == 0:
+        logger.debug(f"WARNING no deps detected for {parent_dep_for_depgraph} - does it exist in dependencies.ref? Include version if it has it")
+
     this_childs_parents = parent_nodes + [parent_dep_for_depgraph]
 
     for child in children:
-        if str(child) != root_component_ref:
-            dep_graph.add_pkg(child)
+        if str(child) != sanitized_root_component_ref:
+            dep_graph.add_pkg(purl_to_depgraph_dep(child))
             increment_dep_path_count(child)
             dep_graph.add_dep(child_node_id=child, parent_node_id=parent_dep_for_depgraph)
 
@@ -318,11 +320,11 @@ def sbom_to_depgraph(parent_component_ref: str, depth: int, parent_nodes: List[s
         visited.extend(visited_temp)
         visited_temp = []
 
-def get_dependencies_from_ref(dependency_ref) -> List:
+def get_dependencies_from_ref(sanitized_ref) -> List:
     global ignored_deps
     children = []
     for dependency in g["sbom"].dependencies:
-        if purl_to_depgraph_dep(str(dependency.ref)) == dependency_ref:
+        if purl_remove_extra_chars(str(dependency.ref)) == sanitized_ref:
             if ignored_deps:
                 children.extend(
                     [
@@ -334,10 +336,9 @@ def get_dependencies_from_ref(dependency_ref) -> List:
                     ]
                 )
             else:
-                children.extend([purl_to_depgraph_dep(str(x.ref)) for x in dependency.dependencies])
+                children.extend([purl_remove_extra_chars(str(x.ref)) for x in dependency.dependencies])
 
     return children
-
 
 def increment_dep_path_count(dep: str):
     """
@@ -363,22 +364,31 @@ def purl_to_depgraph_dep(purl: str) -> str:
     """
     depgraph_dep = translate_link_format(purl) #translate reference format "pkg:npm/@<root>/http@link:../../packages/http",
 
+    depgraph_dep = purl_remove_extra_chars(depgraph_dep)
+
     if depgraph_dep.count("@") < 1 :
         depgraph_dep = f"{depgraph_dep}@0.0.0"
 
+    return depgraph_dep
+
+def purl_remove_extra_chars(purl: str) -> str:
+    """
+    Convert purl format string to package@version for snyk
+    """    
+    sanitized_purl = purl
     #if trailing ? in version, cut it out
-    i = depgraph_dep.find("?")
+    i = sanitized_purl.find("?")
     if i > 0:
-        depgraph_dep = depgraph_dep[:i]
+        sanitized_purl = sanitized_purl[:i]
 
     #if we are maven, need to replace / with :
-    if "pkg:maven/" in depgraph_dep:
-        depgraph_dep = re.sub("pkg:([a-zA-Z0-9_-]*)/","",depgraph_dep)
-        depgraph_dep = depgraph_dep.replace("/", ":")
+    if "pkg:maven/" in sanitized_purl:
+        sanitized_purl = re.sub("pkg:([a-zA-Z0-9_-]*)/","",sanitized_purl)
+        sanitized_purl = sanitized_purl.replace("/", ":")
     else: 
-        depgraph_dep = re.sub("pkg:([a-zA-Z0-9_-]*)/","",depgraph_dep)
+        sanitized_purl = re.sub("pkg:([a-zA-Z0-9_-]*)/","",sanitized_purl)
 
-    return depgraph_dep
+    return sanitized_purl
 
 def get_package_manager_from_sbom() -> str:
     package_manager = None
