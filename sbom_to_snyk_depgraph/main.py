@@ -295,8 +295,11 @@ def sbom_to_depgraph(sanitized_parent_ref: str, depth: int, parent_nodes: List[s
         dep_graph.set_root_node_package(f"{parent_dep_for_depgraph}")
 
     children = get_dependencies_from_ref(parent_dep_for_depgraph)
-    if len(children) == 0 and depth == 0:
-        logger.debug(f"WARNING no deps detected for {parent_dep_for_depgraph} - does it exist in dependencies.ref? Include version if it has it")
+
+    if depth==0:
+        logger.debug(f"# Children found: {len(children)}")
+        if len(children) == 0:
+            logger.debug(f"WARNING no deps detected for {parent_dep_for_depgraph} - does it exist in dependencies.ref? Include version if it has it")
 
     this_childs_parents = parent_nodes + [parent_dep_for_depgraph]
 
