@@ -5,3 +5,4 @@ sbom_to_snyk_depgraph/__pycache__/
 .vscode/settings.json
 .python-version
 sbom_to_snyk_depgraph/.dccache
+sbom_to_snyk_depgraph/test.sh
