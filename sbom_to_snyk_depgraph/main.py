@@ -362,11 +362,10 @@ def purl_to_depgraph_dep(purl: str) -> str:
     """
     Convert purl format string to package@version for snyk
     """
-    depgraph_dep = translate_link_format(purl) #translate reference format "pkg:npm/@<root>/http@link:../../packages/http",
+    depgraph_dep = purl_remove_extra_chars(purl)
 
-    depgraph_dep = purl_remove_extra_chars(depgraph_dep)
-
-    if depgraph_dep.count("@") < 1 :
+    #i think this is all we really have to do in this function now - could detect version better
+    if not re.search("@[0-9]", depgraph_dep):
         depgraph_dep = f"{depgraph_dep}@0.0.0"
 
     return depgraph_dep
@@ -375,7 +374,7 @@ def purl_remove_extra_chars(purl: str) -> str:
     """
     Convert purl format string to package@version for snyk
     """    
-    sanitized_purl = purl
+    sanitized_purl = translate_link_format(purl) #translate reference format "pkg:npm/@<root>/http@link:../../packages/http",
     #if trailing ? in version, cut it out
     i = sanitized_purl.find("?")
     if i > 0:
