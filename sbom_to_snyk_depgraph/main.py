@@ -276,7 +276,7 @@ def translate_link_format(package_ref: str) -> str | None:
         return package_latest_version
     else:
         logger.debug(f"NO PACKAGE VERSION EXISTS: {package_ref}")
-        package_latest_version = package_key + "@-1.-1.-1"
+        package_latest_version = package_key + "@0.0.0"
         return package_latest_version
 
 def sbom_to_depgraph(sanitized_parent_ref: str, depth: int, parent_nodes: List[str]) -> DepGraph:

@@ -197,14 +197,15 @@ class DepGraph(object):
             return [packageName, "0.0.0"]
     
     def set_root_node_package(self, root_node: str):
-
         root_node_split = self.package_name_split(root_node, "@")
+
+        root_node_w_version = f"{root_node_split[0]}@{root_node_split[1]}"
 
         #set first package to root_node name and version
         root_pkg = self.dep_graph['depGraph']['pkgs'][0]
         root_pkg['info']['name'] = f"{root_node_split[0]}"
         root_pkg['info']['version'] = f"{root_node_split[1]}"
-        root_pkg['id'] = root_node
+        root_pkg['id'] = root_node_w_version
 
         #set root node 
         graph = self.dep_graph['depGraph']['graph']
@@ -212,7 +213,7 @@ class DepGraph(object):
 
         #set first graph node id and pkgId to root node
         graph['nodes'][0]['nodeId'] = root_node
-        graph['nodes'][0]['pkgId'] = root_node
+        graph['nodes'][0]['pkgId'] = root_node_w_version
     
     def prune_dep(self, node_id: str):
         # create meta-common-packages@meta pkg if does not already exist
