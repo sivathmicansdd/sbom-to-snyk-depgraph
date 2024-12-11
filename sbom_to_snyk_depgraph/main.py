@@ -223,6 +223,8 @@ def convert_package_name_to_key(package_name: str) -> str:
 def update_package_highest_version(purl: str):
     global latest_package_version
 
+    #logger.debug(f"GETTING HIGHEST VERSION VERSION FOR PACKAGE: {purl}")
+
     package_name_and_version = get_package_name_and_version(purl)
     if len(package_name_and_version) < 2:
         return
@@ -240,12 +242,14 @@ def update_package_highest_version(purl: str):
     package_key = convert_package_name_to_key(package_name)
 
     if Version.is_valid(package_version):
+        #logger.debug(f"VALID VERSION FOR PACKAGE: {package_version}")
         if not latest_package_version.get(package_key) or not Version.is_valid(latest_package_version.get(package_key)) :
             latest_package_version[package_key] = str(package_version)
         elif Version.parse(latest_package_version.get(package_key)) < Version.parse(package_version):
             latest_package_version[package_key] = str(package_version)
     else:
         #this is not a valid semver version, so no way to compare, only set if we can
+        logger.debug(f"NO VALID VERSION FOR PACKAGE: {purl}")
         if not latest_package_version.get(package_key):
             latest_package_version[package_key] = str(package_version)
 
@@ -262,9 +266,31 @@ def get_latest_package_versions(parent_component_ref: str, depth: int, parent_no
 def translate_link_format(package_ref: str) -> str | None:
     global latest_package_version
 
-    if package_ref.rfind("link:../../") < 0:
+    package_latest_version = package_ref
+    if package_ref.rfind("link:../../") > 0:
+        k = package_ref.rfind("@")
+        package_name = package_ref[:k]
+        package_key = convert_package_name_to_key(package_name)
+
+        #get latest package version
+        if latest_package_version.get(package_key):
+            package_latest_version = package_key + "@" + latest_package_version.get(package_key)
+        else:
+            logger.debug(f"NO PACKAGE VERSION EXISTS: {package_ref}")
+            package_latest_version = package_key + "@0.0.0"
+    
+    package_latest_version = translate_latest_format(package_latest_version)
+    package_latest_version = translate_relative_dir_format(package_latest_version)
+    return package_latest_version
+
+def translate_latest_format(package_ref: str) -> str | None:
+    global latest_package_version
+
+    if package_ref.rfind("@latest#") < 0:
         #no special format found, return original ref
         return package_ref
+    
+    #logger.debug(f"Translating @latest format for: {package_ref}")
 
     k = package_ref.rfind("@")
     package_name = package_ref[:k]
@@ -272,12 +298,39 @@ def translate_link_format(package_ref: str) -> str | None:
 
     #get latest package version
     if latest_package_version.get(package_key):
+        #logger.debug(f"PACKAGE VERSION EXISTS FOR @LATEST: {package_ref}")
         package_latest_version = package_key + "@" + latest_package_version.get(package_key)
         return package_latest_version
     else:
-        logger.debug(f"NO PACKAGE VERSION EXISTS: {package_ref}")
+        #logger.debug(f"NO PACKAGE VERSION EXISTS FOR @LATEST: {package_ref}")
         package_latest_version = package_key + "@0.0.0"
+        #logger.debug(f"returning package_latest_version: {package_latest_version}")
+        return package_latest_version   
+    
+def translate_relative_dir_format(package_ref: str) -> str | None:
+    global latest_package_version
+
+    if package_ref.rfind("@../../") < 0:
+        #no special format found, return original ref
+        return package_ref
+    
+    logger.debug(f"Translating @../../ format for: {package_ref}")
+
+    k = package_ref.rfind("@")
+    package_name = package_ref[:k]
+    package_key = convert_package_name_to_key(package_name)
+
+    #get latest package version
+    if latest_package_version.get(package_key):
+        #logger.debug(f"PACKAGE VERSION EXISTS FOR @../../: {package_ref}")
+        package_latest_version = package_key + "@" + latest_package_version.get(package_key)
         return package_latest_version
+    else:
+        #logger.debug(f"NO PACKAGE VERSION EXISTS FOR @../../: {package_ref}")
+        package_latest_version = package_key + "@0.0.0"
+        #logger.debug(f"returning package_latest_version: {package_latest_version}")
+    
+    return package_latest_version
 
 def sbom_to_depgraph(sanitized_parent_ref: str, depth: int, parent_nodes: List[str]) -> DepGraph:
     """
@@ -378,6 +431,7 @@ def purl_remove_extra_chars(purl: str) -> str:
     Convert purl format string to package@version for snyk
     """    
     sanitized_purl = translate_link_format(purl) #translate reference format "pkg:npm/@<root>/http@link:../../packages/http",
+
     #if trailing ? in version, cut it out
     i = sanitized_purl.find("?")
     if i > 0:
